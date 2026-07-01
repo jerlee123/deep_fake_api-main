@@ -9,9 +9,7 @@ from Crypto.PublicKey import RSA
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
 
-# >>> NEW: utilise la nouvelle def modèle
-# Assure-toi que deepfake_model.py est dans le PYTHONPATH (même dossier que l’API)
-from deepfake_model import DeepfakeDetector, load_model
+from vivit_bilstm_model import ViViTBiLSTMDetector as EKYCDetector
 
 # ------------------ CONFIG & APP ------------------
 KEYS_DIR = "keys"
@@ -202,18 +200,66 @@ def uniform_frame_indices(nb_frames, n):
 
 # ------------------ NOUVEAU: modèle & préproc ------------------
 
-ckpt_config = {
-    "num_classes": 2,
-    "latent_dim": 2048,   
-    "lstm_layers": 2,
-    "hidden_dim": 512,    
-    "num_heads": 4,
-    "bidirectional": True,
-    "dropout": 0.3
-}
-DETECTOR = load_model("checkpoint.pth", model_config=ckpt_config, device=DEVICE)
-MODEL    = DETECTOR.model
-TRANS    = DETECTOR.transform
+VIVIT_TIME_SIZE = 8
+
+
+def preprocess_frames_for_vivit(frames_rgb: list[np.ndarray]) -> torch.Tensor:
+    """Convert RGB frames to ViViT input tensor [1, C, T, H, W]."""
+    processed = []
+    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+    for frame in frames_rgb:
+        resized = cv2.resize(frame, (224, 224)).astype(np.float32) / 255.0
+        normalized = (resized - mean) / std
+        processed.append(normalized)
+
+    # [T, H, W, C] -> [1, C, T, H, W]
+    tensor = torch.from_numpy(np.array(processed)).permute(0, 3, 1, 2)
+    tensor = tensor.unsqueeze(0).permute(0, 2, 1, 3, 4)
+    return tensor.to(DEVICE)
+
+
+def predict_from_frames_vivit(frames_rgb: list[np.ndarray]) -> dict:
+    """Run ViViT on a list of RGB frames and return API-compatible scores."""
+    if not DETECTOR_READY:
+        raise RuntimeError("ViViT checkpoint is not loaded. Set VIVIT_MODEL_PATH or provide ekyc_checkpoint.pth.")
+
+    tensor = preprocess_frames_for_vivit(frames_rgb)
+    result = DETECTOR.predict_video(tensor)
+
+    is_real = result.get("label") == "REAL"
+    real_prob = float((result.get("probabilities") or {}).get("real", 0.0))
+    spoof_prob = float((result.get("probabilities") or {}).get("spoof", 0.0))
+    return {
+        "label": "REAL" if is_real else "FAKE",
+        "confidence": float(result.get("confidence", 0.0) * 100.0),
+        "probabilities": {
+            "FAKE": spoof_prob * 100.0,
+            "REAL": real_prob * 100.0,
+        },
+    }
+
+
+DETECTOR = EKYCDetector(device=DEVICE)
+DETECTOR_CHECKPOINT = None
+for candidate in [os.getenv("VIVIT_MODEL_PATH", ""), "ekyc_checkpoint.pth", "checkpoint.pth"]:
+    if not candidate:
+        continue
+    if not os.path.exists(candidate):
+        continue
+    try:
+        DETECTOR.load_model(candidate)
+        DETECTOR_CHECKPOINT = candidate
+        break
+    except Exception as e:
+        print(f"Could not load ViViT checkpoint from {candidate}: {e}")
+
+DETECTOR_READY = DETECTOR_CHECKPOINT is not None
+if DETECTOR_READY:
+    print(f"ViViT loaded on {DEVICE} from {DETECTOR_CHECKPOINT}")
+else:
+    print("ViViT checkpoint not found. Expected VIVIT_MODEL_PATH, ekyc_checkpoint.pth, or checkpoint.pth")
 
 def infer_frame_with_new_model(frame_bgr: np.ndarray) -> tuple[str, float]:
     """
@@ -226,37 +272,47 @@ def infer_frame_with_new_model(frame_bgr: np.ndarray) -> tuple[str, float]:
     if face is None or face.size == 0:
         face = frame_bgr
 
-    # 2) BGR->RGB + Albumentations (Resize 180, Normalize ImageNet)
+    # 2) BGR->RGB then repeat a short clip so ViViT can infer on a single frame context
     rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
-    tens = TRANS(rgb)     
-
-    # 3) forme attendue: [B, T, C, H, W] ; ici B=1, T=1
-    seq = tens.unsqueeze(0).unsqueeze(0).to(DEVICE)  # [1,1,3,180,180]
-
-    with torch.no_grad():
-        _, logits, _ = MODEL(seq)
-        probs = torch.softmax(logits, dim=1)[0]      # [2]
-        pred  = int(torch.argmax(probs).item())
-        conf  = float(torch.max(probs).item() * 100.0)
-        label = "REAL" if pred == 1 else "FAKE"      # mapping conforme au code fourni
-    return label, conf
+    clip = [rgb for _ in range(VIVIT_TIME_SIZE)]
+    result = predict_from_frames_vivit(clip)
+    return result["label"], result["confidence"]
 
 def infer_video_with_new_model(video_path: str, sequence_length: int = 30) -> dict:
     """
     Run the model the way it was designed for final classification:
     one temporal sequence of frames -> one video-level prediction.
     """
-    result = DETECTOR.predict_video(video_path, sequence_length=sequence_length)
-    confidence = float(result.get("confidence", 0.0) * 100.0)
-    probabilities = result.get("probabilities") or {}
-    return {
-        "label": result.get("label", "Unknown"),
-        "confidence": confidence,
-        "probabilities": {
-            "FAKE": float(probabilities.get("FAKE", 0.0) * 100.0),
-            "REAL": float(probabilities.get("REAL", 0.0) * 100.0),
-        },
-    }
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video: {video_path}")
+
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if frame_count < 1:
+        cap.release()
+        raise ValueError("No frames in video.")
+
+    indices = uniform_frame_indices(frame_count, VIVIT_TIME_SIZE)
+    frames_rgb = []
+    for idx in indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        if ret and frame is not None:
+            face = detect_best_face_from_frame(frame)
+            if face is None or face.size == 0:
+                face = frame
+            frames_rgb.append(cv2.cvtColor(face, cv2.COLOR_BGR2RGB))
+    cap.release()
+
+    if not frames_rgb:
+        raise ValueError("No valid frames extracted for ViViT inference.")
+
+    # Pad to exactly T=8 as required by the ViViT model configuration.
+    while len(frames_rgb) < VIVIT_TIME_SIZE:
+        frames_rgb.append(frames_rgb[-1])
+    frames_rgb = frames_rgb[:VIVIT_TIME_SIZE]
+
+    return predict_from_frames_vivit(frames_rgb)
 
 # ------------------ ENDPOINTS ------------------
 @app.get("/health")
@@ -264,7 +320,8 @@ async def health_check():
     return {
         "status": "ok",
         "device": DEVICE,
-        "model_loaded": DETECTOR is not None,
+        "model_loaded": DETECTOR_READY,
+        "model_checkpoint": DETECTOR_CHECKPOINT,
     }
 
 @app.post("/predict/")
