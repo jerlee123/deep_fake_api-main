@@ -1,0 +1,129 @@
+@startuml
+left to right direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam dpi 150
+
+' -------- Couleurs (palette)
+' Mobile:      #E3F2FD / #2196F3
+' Backend:     #FFF3E0 / #FB8C00
+' Utility:     #E8F5E9 / #43A047
+' External:    #F3E5F5 / #8E24AA
+' Storage:     #E0F7FA / #00838F
+' Liens:
+'  - Interactions (#9E9E9E)
+'  - Auth        (#8E24AA)
+'  - In-app      (#2E7D32)
+'  - Backend     (#1976D2)
+'  - Model       (#FB8C00)
+'  - NEW         (#00838F)
+
+' -------- Styles globaux par stéréotype
+skinparam actor {
+  BackgroundColor #E0E0E0
+  BorderColor #424242
+}
+
+skinparam package {
+  BorderColor #9E9E9E
+}
+
+skinparam package<<MobilePkg>> {
+  BackgroundColor #E3F2FD
+  BorderColor #2196F3
+}
+skinparam package<<BackendPkg>> {
+  BackgroundColor #FFF3E0
+  BorderColor #FB8C00
+}
+
+skinparam component<<Mobile>> {
+  BackgroundColor #E3F2FD
+  BorderColor #2196F3
+}
+skinparam component<<Backend>> {
+  BackgroundColor #FFF3E0
+  BorderColor #FB8C00
+}
+skinparam component<<Utility>> {
+  BackgroundColor #E8F5E9
+  BorderColor #43A047
+}
+skinparam component<<External>> {
+  BackgroundColor #F3E5F5
+  BorderColor #8E24AA
+}
+
+skinparam database<<Storage>> {
+  BackgroundColor #E0F7FA
+  BorderColor #00838F
+}
+
+actor User
+
+package "Mobile App (Flutter)" <<MobilePkg>> {
+  [LoginScreenWidget\n(Google Auth UI)] as Login <<Mobile>>
+  [AnalyzeScreenWidget\n(User Interface)] as Analyze <<Mobile>>
+  [Firebase Auth] as Firebase <<External>>
+  [FilePicker Plugin] as FilePicker <<Utility>>
+  [Share Plugin\n(share_plus)] as Share <<Utility>>
+  [AnalyzeHistoryService] as History <<Utility>>
+  [VideoPlayer\n(Chewie)] as Player <<Utility>>
+}
+
+database "Local Storage\n(on Device)" as Local <<Storage>>
+[Google Auth Provider] as Google <<External>>
+
+package "Backend Server (FastAPI)" <<BackendPkg>> {
+  [Prediction API\n/predict] as Predict <<Backend>>
+  [CSV Export API\n/predict_csv] as CsvApi <<Backend>>
+  [Deepfake Model\n(ResNeXt + LSTM)] as Model <<Backend>>
+  [Ffprobe] as Ffprobe <<Backend>>
+
+  ' --- NEW endpoints
+  [Face Detection API\n/detect_faces] as DetectFaces <<Backend>>
+  [Signature \n/sign] as Sign <<Backend>>
+  [Verify \n/verify] as Verify <<Backend>>
+}
+
+' --- User interactions
+User -[#9E9E9E]-> Login : Open app & Login
+User -[#9E9E9E]-> Analyze : Triggers analysis
+
+' --- Auth flow
+Login ..[#8E24AA]> Firebase : Sign in (Google)
+Login ..[#8E24AA]> Firebase : Auth token / User info
+Analyze ..[#8E24AA]> Firebase : Verify auth / session
+Firebase -[#8E24AA]-> Google : OAuth2.0 Login
+
+' --- In-app utilities
+Analyze ..[#2E7D32]> FilePicker : Select video
+Analyze ..[#2E7D32]> Share : Share file
+Analyze ..[#2E7D32]> History : Store results
+Analyze ..[#2E7D32]> Player : Play video
+Analyze ..[#2E7D32]> Local : Write CSV
+History -[#2E7D32]-> Local : Save history
+
+' --- Backend calls (existing)
+Analyze -[#1976D2]-> Predict : Upload video for analysis
+Predict -[#1976D2]-> Analyze : Return JSON results
+Analyze -[#1976D2]-> CsvApi : (Optional) Export CSV
+CsvApi -[#1976D2]-> Analyze : Return CSV
+
+' --- Model usage on server
+Predict -[#FB8C00]-> Model : Run deepfake detection
+Model -[#FB8C00]-> Predict : Analyze per frame
+Predict <-[#FB8C00]- Ffprobe : extract metadata
+
+' --- NEW flows
+Analyze -[#00838F]-> DetectFaces : Upload video\nfor face detection
+DetectFaces -[#00838F]-> Analyze : Return boolean (has_face)\n+ face image
+
+Analyze -[#00838F]-> Sign : Send video (exact bytes)
+Sign -[#00838F]-> Analyze : Return signature (base64)\n+ SHA-256 (hex)
+
+Analyze -[#00838F]-> Verify : Send video bytes\n+ signature to verify
+Verify -[#00838F]-> Analyze : Return verification result\n(match true/false)
+
+
+@enduml

@@ -1,0 +1,37 @@
+for each video in that statistic: 
+
+what is the pourcentage of confidence
+
+
+in page analyze and historic we can share export etc...
+
+
+record the time of the crop time of each slice.
+
+
+5W u have to include on the information on the app.
+which device record
+
+hashing value of the video Watch the book chapter hashage.
+
+video type mp4 et autres
+whats is the type of metadata we can get on this video.
+u have to chose frame on the crop face on the statistics
+
+
+- faire comme sur la vidéo en termes de design 
+- faire la partie meta data et quel appareil utilisés
+- faire la partie sign in
+- faire la partie modele de données
+- documenter l'api
+- REGARDE qing
+- determine if the video are manipulated or not with zou qing qing
+- pour les results et metadate mets les dans un container avec des bordures pour une meilleur visualisation
+- frame number
+- juste en dessous de Face cropped Frames il faut un bouton extract csv of each frame confidence in the 30 frames
+- puis ensuite il faut enregistrer les données en base pour les statistics
+- try with less resolution and focus on the faces
+
+
+- fait en sorte que le csv prend toutes les frames de la vidéo celle reel celle fause pour avoir une meilleur visualisation
+- rotation des faces quand

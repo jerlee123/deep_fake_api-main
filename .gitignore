@@ -1,0 +1,23 @@
+# Dépendances / builds
+node_modules/
+dist/
+build/
+*.log
+
+# Environnements
+.venv/
+.env
+
+# Dossiers de données volumineux
+SHORT_VIDEO_HD/
+data/
+datasets/
+videos/
+
+# Gros binaires fréquents
+*.pt
+*.ckpt
+*.mp4
+*.zip
+*.tar
+*.7z

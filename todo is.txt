@@ -1,0 +1,6 @@
+check about the verify input (not working in the front end)  OK 
+add data for all the history ( genre tu peux avoir toutes les données de l'historique) 
+you can also share information about meta data and also you can chose long or short report (only metadata result, or with 4 frames also)
+
+add about the meta data the algoritm of face detection used.
+Il faut aussi que tu puisse changer sur le front end pour changer le modèle 

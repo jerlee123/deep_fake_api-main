@@ -1,0 +1,16 @@
++--[ED25519 256]--+
+|                 |
+|                 |
+|     .   E       |
+|    ..... .      |
+|  . .=o+S        |
+|   *o O.+.       |
+|  ..*O = .       |
+| . **+& .        |
+|oo=*%&=*         |
++----[SHA256]-----+
+
+
+
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDgt6X4mbQhJf7lv15LYzP5QhluLWh0Df970KyLdjxCQ amined2am
+

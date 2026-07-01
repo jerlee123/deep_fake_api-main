@@ -1,0 +1,23 @@
+& C:/src/deepfake_api/.venv/Scripts/uvicorn.exe api:app --reload
+.venv\Scripts\python.exe -m uvicorn api:app --reload
+
+
+si non installé
+& C:/src/deepfake_api/.venv/Scripts/pip.exe install uvicorn
+
+
+pour les dépendances 
+pip install -r requirements.txt
+
+pour passer en environement 3.10 
+.venv\Scripts\activate
+
+avec la version pour changer de version python
+py -3.10 -m venv .venv
+
+
+Faire ça 
+#python -m pip install -r requirements.lock.txt
+
+#Avant --> pip install -r requirements.txt
+python -m pip install .\dlib-19.22.99-cp310-cp310-win_amd64.whl

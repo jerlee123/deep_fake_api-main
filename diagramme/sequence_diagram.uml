@@ -1,0 +1,130 @@
+@startuml
+' Optional: autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam dpi 150
+skinparam RoundCorner 8
+skinparam ArrowThickness 1.2
+skinparam ParticipantPadding 20
+skinparam BoxPadding 10
+
+skinparam sequence {
+  LifeLineBorderColor #9E9E9E
+  LifeLineBackgroundColor #FAFAFA
+  ActorBorderColor #424242
+  ActorBackgroundColor #E0E0E0
+  ParticipantBorderColor #616161
+  ParticipantBackgroundColor #FAFAFA
+  ActivationBorderColor #616161
+  ActivationBackgroundColor #EEEEEE
+  GroupBorderColor #9E9E9E
+  GroupBackgroundColor #F5F5F5
+  NoteBorderColor #9E9E9E
+}
+
+' ---- Styles par stéréotype (mêmes couleurs que le diagramme de composants)
+' UI (Mobile):       #E3F2FD / #2196F3
+' Plugins/Services:  #E8F5E9 / #43A047
+' External (OAuth):  #F3E5F5 / #8E24AA
+' Backend (FastAPI): #FFF3E0 / #FB8C00
+skinparam participant<<UI>> {
+  BackgroundColor #E3F2FD
+  BorderColor #2196F3
+}
+skinparam participant<<Plugin>> {
+  BackgroundColor #E8F5E9
+  BorderColor #43A047
+}
+skinparam participant<<External>> {
+  BackgroundColor #F3E5F5
+  BorderColor #8E24AA
+}
+skinparam participant<<Backend>> {
+  BackgroundColor #FFF3E0
+  BorderColor #FB8C00
+}
+
+' ---- Acteur
+actor User #E0E0E0
+
+' ---- Participants
+participant "LoginScreenWidget\n(Google Auth UI)" as Login <<UI>>
+participant "Firebase Auth\n(Google)" as Firebase <<External>>
+participant "AnalyzeScreenWidget\n(Flutter UI)" as Analyze <<UI>>
+participant "FilePicker Plugin" as FilePicker <<Plugin>>
+participant "VideoPlayer / Chewie" as Player <<Plugin>>
+participant "FastAPI Server\n/predict" as Predict <<Backend>>
+participant "FastAPI Server\n/predict_csv" as CsvApi <<Backend>>
+participant "FastAPI Server\n/detect_faces" as DetectFaces <<Backend>>
+participant "FastAPI Server\n/integrity/sign" as SignApi <<Backend>>
+participant "FastAPI Server\n/integrity/verify" as VerifyApi <<Backend>>
+participant "AnalyzeHistoryService" as History <<Plugin>>
+
+' ---- Couleurs de flux
+' Interactions utilisateur:   #9E9E9E
+' Auth (OAuth/Firebase):      #8E24AA
+' In-app (plugins/UI):        #2E7D32
+' Backend (analyse/CSV):      #1976D2
+' NEW (faces + intégrité):    #00838F
+
+== Authentication ==
+User -[#9E9E9E]-> Login : Launch app
+Login -[#8E24AA]-> Firebase : Start Google Sign-in
+Firebase -[#8E24AA]-> Login : Return auth token / user info
+Login -[#9E9E9E]-> User : Show login success
+
+== Video Analysis ==
+User -[#9E9E9E]-> Analyze : Select video
+Analyze -[#2E7D32]-> FilePicker : Pick video file
+FilePicker -[#2E7D32]-> Analyze : Return video file
+Analyze -[#2E7D32]-> Player : Initialize video preview
+
+User -[#9E9E9E]-> Analyze : Click "Analyze"
+Analyze -[#1976D2]-> Predict : Upload video (POST /predict)
+activate Predict
+note right of Predict #FFF3E0
+  Process with ResNeXt+LSTM model
+  + ffprobe metadata
+  + best-face crop per frame
+end note
+Predict -[#1976D2]-> Analyze : Return result (JSON)
+deactivate Predict
+
+Analyze -[#2E7D32]-> History : Save analysis to history
+History -[#2E7D32]-> Analyze : Ack
+Analyze -[#9E9E9E]-> User : Display results (frames, metadata, result)
+
+== (Optional) Export CSV ==
+User -[#9E9E9E]-> Analyze : Click "Export CSV"
+Analyze -[#1976D2]-> CsvApi : Upload video (POST /predict_csv)
+activate CsvApi
+note right of CsvApi #FFF3E0
+  Frame-by-frame analysis
+  Build CSV rows (index, time, label, confidence)
+end note
+CsvApi -[#1976D2]-> Analyze : Return frame CSV data
+deactivate CsvApi
+Analyze -[#9E9E9E]-> User : Write & share "split_frames.csv"
+
+== (Optional) Face Detection ==
+Analyze -[#00838F]-> DetectFaces : Upload video (POST /detect_faces)
+activate DetectFaces
+DetectFaces -[#00838F]-> Analyze : has_face + face image URL
+deactivate DetectFaces
+
+== (Optional) Integrity: Sign & Verify ==
+group Signature (server-side)
+  Analyze -[#00838F]-> SignApi : Upload video (POST /integrity/sign)
+  activate SignApi
+  note right of SignApi #FFF3E0
+    Sign octets (RSA)
+    Return:
+    - signature (base64)
+    - SHA-256 (hex)
+  end note
+  SignApi -[#00838F]-> Analyze : { signature_base64, sha256_hex }
+  deactivate SignApi
+end group
+
+group Verify (server-side)
+  Analyze -[#00838F]-> VerifyApi

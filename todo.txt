@@ -1,0 +1,2 @@
+faire en sorte que si aucune face n'est détecter alors on ne lance pas le modèle et on envoie un message d'erreur côté app.
+pour le benchmark idem une colonne face_detected or not
