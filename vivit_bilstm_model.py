@@ -310,8 +310,30 @@ class ViViTBiLSTMDetector:
 
     def load_model(self, model_path: str):
         raw = torch.load(model_path, map_location=self.device)
-        # Support plain state_dict or wrapped checkpoint
-        state = raw.get('model_state_dict', raw) if isinstance(raw, dict) and 'model_state_dict' in raw else raw
+
+        if isinstance(raw, dict) and 'model_state_dict' in raw:
+            state = raw['model_state_dict']
+            ckpt_args = raw.get('args', {}) or {}
+
+            model_kwargs = {
+                'num_classes': 2,
+                'img_size': ckpt_args.get('img_size', 224),
+                'patch_size': 16,
+                'T': ckpt_args.get('T', self.T),
+                'embed_dim': ckpt_args.get('embed_dim', 384),
+                'vit_depth': ckpt_args.get('vit_depth', 4),
+                'vit_heads': ckpt_args.get('vit_heads', 8),
+                'lstm_hidden': ckpt_args.get('lstm_hidden', 256),
+                'lstm_layers': ckpt_args.get('lstm_layers', 2),
+                'attn_heads': ckpt_args.get('attn_heads', 8),
+                'dropout': ckpt_args.get('dropout', 0.3),
+            }
+
+            self.T = model_kwargs['T']
+            self.model = DeepfakeViViTBiLSTM(**model_kwargs).to(self.device)
+        else:
+            state = raw
+
         self.model.load_state_dict(state, strict=True)
         self.model.eval()
         print(f"[ViViTBiLSTMDetector] Loaded from {model_path} on {self.device}")
