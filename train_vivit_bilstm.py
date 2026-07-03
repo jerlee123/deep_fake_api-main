@@ -188,7 +188,7 @@ def train(args):
     # ------------------------------------------------------------------
     # Model
     # ------------------------------------------------------------------
-    print("\nBuilding model: ViViT + BiLSTM + Temporal Attention")
+    print("\nBuilding model: ViViT + BiLSTM + Temporal Attention" + (" + Quantum Head" if args.use_quantum else ""))
     model = DeepfakeViViTBiLSTM(
         num_classes=2,
         img_size=args.img_size,
@@ -201,6 +201,9 @@ def train(args):
         lstm_layers=args.lstm_layers,
         attn_heads=args.attn_heads,
         dropout=args.dropout,
+        use_quantum=args.use_quantum,
+        n_qubits=args.n_qubits,
+        quantum_layers=args.quantum_layers,
     ).to(device)
 
     total_params = sum(p.numel() for p in model.parameters()) / 1e6
@@ -316,6 +319,12 @@ def parse_args():
     p.add_argument("--lstm_layers", type=int,   default=2)
     p.add_argument("--attn_heads",  type=int,   default=8)
     p.add_argument("--dropout",     type=float, default=0.3)
+    p.add_argument("--use_quantum", action="store_true",
+                   help="Enable hybrid Quantum Neural Network classifier head (requires pennylane)")
+    p.add_argument("--n_qubits",    type=int,   default=4,
+                   help="Number of qubits for quantum classifier")
+    p.add_argument("--quantum_layers", type=int, default=2,
+                   help="Number of variational layers in quantum circuit")
     return p.parse_args()
 
 

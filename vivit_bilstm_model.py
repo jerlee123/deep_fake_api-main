@@ -25,6 +25,13 @@ import torch.nn.functional as F
 import numpy as np
 import cv2
 
+try:
+    import pennylane as qml
+    PENNYLANE_AVAILABLE = True
+except Exception:
+    qml = None
+    PENNYLANE_AVAILABLE = False
+
 
 # ---------------------------------------------------------------------------
 # Building Blocks
@@ -205,6 +212,46 @@ class TemporalAttention(nn.Module):
         return x.mean(dim=1)                            # [B, D]  mean pool over T
 
 
+class QuantumClassifier(nn.Module):
+    """Optional Quantum Neural Network classifier head via PennyLane."""
+
+    def __init__(self, input_dim: int, num_classes: int = 2,
+                 n_qubits: int = 4, quantum_layers: int = 2, dropout: float = 0.2):
+        super().__init__()
+        if not PENNYLANE_AVAILABLE:
+            raise ImportError(
+                "pennylane is required for --use_quantum mode. Install with: pip install pennylane"
+            )
+
+        self.n_qubits = n_qubits
+        self.input_proj = nn.Linear(input_dim, n_qubits)
+
+        dev = qml.device("default.qubit", wires=n_qubits)
+
+        @qml.qnode(dev, interface="torch")
+        def circuit(inputs, weights):
+            qml.AngleEmbedding(inputs, wires=range(n_qubits), rotation="Y")
+            qml.StronglyEntanglingLayers(weights, wires=range(n_qubits))
+            return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
+
+        weight_shapes = {"weights": (quantum_layers, n_qubits, 3)}
+        self.quantum_layer = qml.qnn.TorchLayer(circuit, weight_shapes)
+
+        hidden = max(8, n_qubits * 2)
+        self.post = nn.Sequential(
+            nn.Linear(n_qubits, hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Clamp to a stable angle range for quantum embedding.
+        q_in = torch.tanh(self.input_proj(x)) * np.pi
+        q_out = self.quantum_layer(q_in)
+        return self.post(q_out)
+
+
 # ---------------------------------------------------------------------------
 # Full Model
 # ---------------------------------------------------------------------------
@@ -237,9 +284,13 @@ class DeepfakeViViTBiLSTM(nn.Module):
         lstm_layers: int = 2,
         attn_heads:  int = 8,
         dropout:     float = 0.3,
+        use_quantum: bool = False,
+        n_qubits: int = 4,
+        quantum_layers: int = 2,
     ):
         super().__init__()
         self.T = T
+        self.use_quantum = use_quantum
 
         # Stage 1 – ViViT frame encoder
         self.vit_encoder = ViViTFrameEncoder(
@@ -261,12 +312,21 @@ class DeepfakeViViTBiLSTM(nn.Module):
         )
 
         # Stage 4 – Classifier
-        self.classifier = nn.Sequential(
-            nn.Linear(lstm_out_dim, lstm_out_dim // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(lstm_out_dim // 2, num_classes),
-        )
+        if use_quantum:
+            self.classifier = QuantumClassifier(
+                input_dim=lstm_out_dim,
+                num_classes=num_classes,
+                n_qubits=n_qubits,
+                quantum_layers=quantum_layers,
+                dropout=dropout,
+            )
+        else:
+            self.classifier = nn.Sequential(
+                nn.Linear(lstm_out_dim, lstm_out_dim // 2),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(lstm_out_dim // 2, num_classes),
+            )
 
     def forward(self, x: torch.Tensor):
         """
@@ -327,6 +387,9 @@ class ViViTBiLSTMDetector:
                 'lstm_layers': ckpt_args.get('lstm_layers', 2),
                 'attn_heads': ckpt_args.get('attn_heads', 8),
                 'dropout': ckpt_args.get('dropout', 0.3),
+                'use_quantum': ckpt_args.get('use_quantum', False),
+                'n_qubits': ckpt_args.get('n_qubits', 4),
+                'quantum_layers': ckpt_args.get('quantum_layers', 2),
             }
 
             self.T = model_kwargs['T']
