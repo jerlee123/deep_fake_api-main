@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import torch, tempfile, os, time, cv2, numpy as np, uuid, subprocess, json, base64
@@ -17,7 +17,13 @@ PRIVATE_KEY_PATH = os.path.join(KEYS_DIR, "private.pem")
 PUBLIC_KEY_PATH  = os.path.join(KEYS_DIR, "public.pem")
 os.makedirs(KEYS_DIR, exist_ok=True)
 
-app = FastAPI()
+app = FastAPI(
+    title="Deep-Fake Detection and Live eKYC API",
+    description=(
+        "One API for uploaded-video deepfake analysis and real-time eKYC "
+        "liveness detection over WebSocket."
+    ),
+)
 
 # Enable CORS for Flutter app
 app.add_middleware(
@@ -29,6 +35,52 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Reuse the real-time implementation in this FastAPI application so REST and
+# WebSocket traffic can share one Uvicorn port and one Cloudflare Tunnel.
+from realtime_ekyc_api import (
+    websocket_ekyc_stream,
+    health_check as realtime_health_check,
+    get_stats as realtime_get_stats,
+)
+
+app.add_api_websocket_route(
+    "/ws/ekyc-stream/{client_id}",
+    websocket_ekyc_stream,
+    name="realtime_ekyc_stream",
+)
+
+
+@app.get("/realtime/info", tags=["Live eKYC"])
+async def realtime_info(request: Request):
+    """Describe the WebSocket endpoint, which OpenAPI cannot display."""
+    forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    ws_scheme = "wss" if forwarded_proto == "https" else "ws"
+    host = request.headers.get("host", request.url.netloc)
+    return {
+        "transport": "WebSocket",
+        "endpoint": "/ws/ekyc-stream/{client_id}",
+        "example_url": f"{ws_scheme}://{host}/ws/ekyc-stream/example_client",
+        "frame_message": {
+            "type": "frame",
+            "data": "base64_encoded_jpeg",
+            "timestamp": "ISO-8601 timestamp",
+        },
+        "buffer_size": 8,
+        "note": "WebSocket routes are not listed in Swagger/OpenAPI.",
+    }
+
+
+@app.get("/realtime/health", tags=["Live eKYC"])
+async def unified_realtime_health():
+    """Return the health of the real-time eKYC processor."""
+    return await realtime_health_check()
+
+
+@app.get("/realtime/stats", tags=["Live eKYC"])
+async def unified_realtime_stats():
+    """Return active real-time clients and frame-buffer statistics."""
+    return await realtime_get_stats()
 
 CROPPED_DIR      = "static/cropped_faces"
 SPLIT_FRAMES_DIR = "static/split_frames"

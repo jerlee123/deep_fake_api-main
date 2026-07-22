@@ -109,16 +109,18 @@ class RealtimePADProcessor:
             # Normalize
             frame = frame.astype(np.float32) / 255.0
             # Imagenet normalization
-            mean = np.array([0.485, 0.456, 0.406])
-            std = np.array([0.229, 0.224, 0.225])
+            mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+            std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
             frame = (frame - mean) / std
             processed.append(frame)
         
         # Convert to tensor [8, C, H, W] then add batch → [1, C, 8, H, W]
-        tensor = torch.from_numpy(np.array(processed)).permute(0, 3, 1, 2)
+        tensor = torch.from_numpy(
+            np.asarray(processed, dtype=np.float32)
+        ).permute(0, 3, 1, 2)
         tensor = tensor.unsqueeze(0).permute(0, 2, 1, 3, 4)  # [1, C, T, H, W]
         
-        return tensor.to(self.device)
+        return tensor.to(device=self.device, dtype=torch.float32)
     
     def infer(self, frames: np.ndarray) -> Dict:
         """Run inference on frame buffer."""
@@ -226,6 +228,14 @@ async def websocket_ekyc_stream(websocket: WebSocket, client_id: str):
                         
                         # Run async inference
                         result = processor.infer(frames)
+
+                        if result.get('error'):
+                            await websocket.send_json({
+                                'type': 'error',
+                                'message': 'Real-time inference failed'
+                            })
+                            buffer.clear()
+                            continue
                         
                         # Send inference result
                         await websocket.send_json({
